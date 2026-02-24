@@ -25,6 +25,7 @@ import { transcribeAudio, generateSpeech } from "./audioTool.js";
 import { getCalendarEvents, createCalendarEvent, updateCalendarEvent, deleteCalendarEvent, findFreeTime } from "./calendarTool.js";
 import { readFile, readTextFile, readWordDocument, readPdfDocument, listDirectory, getLatestFile } from "./fileTool.js";
 import { sendSlackMessage, sendSlackAnnouncement, sendSlackLink } from "./slackTool.js";
+import { generateImage } from "./imageTool.js";
 
 
 const googleApiKey = process.env.GOOGLE_API_KEY;
@@ -43,7 +44,7 @@ const classifierLlm = new ChatGoogleGenerativeAI({
   temperature: 0, // Deterministic
 });
 
-console.log(" E.D.I.T.H. Online (Gemini 3 Pro) - Semantic Classification Enabled.");
+console.log(" E.D.I.T.H. Online (Gemini 3 Flash) - Semantic Classification Enabled.");
 
 // =============================================================================
 // TOOL DEFINITIONS BY CATEGORY
@@ -53,9 +54,9 @@ console.log(" E.D.I.T.H. Online (Gemini 3 Pro) - Semantic Classification Enabled
 const jiraReadTools = [
   new DynamicStructuredTool({
     name: "search_jira_issues",
-    description: "Search Jira issues. ARGUMENT MUST BE A JSON OBJECT WITH KEY 'jql'.",
+    description: "Search Jira issues using JQL. For FASTER searches, include the project key in the JQL (e.g., 'project = FDIT'). If user doesn't specify a project/space, ASK them which project to search in - do NOT search all projects blindly. Example JQL: 'project = FDIT AND status = Open'.",
     schema: z.object({
-      jql: z.string().describe("The JQL query string. REQUIRED."),
+      jql: z.string().describe("REQUIRED: The JQL query string. Should include 'project = KEY' for faster results. ASK user for project key if not provided."),
     }),
     func: getJiraIssues,
   }),
@@ -65,10 +66,10 @@ const jiraReadTools = [
 const jiraWriteTools = [
   new DynamicStructuredTool({
     name: "create_jira_issue",
-    description: "Create a Jira ticket.",
+    description: "Create a Jira ticket. REQUIRES 'projectKey'. If user doesn't specify which project/space, ASK them - do NOT guess or retry.",
     schema: z.object({
-      projectKey: z.string().describe("Project Key (e.g., 'FDIT')"),
-      summary: z.string().describe("Ticket title"),
+      projectKey: z.string().describe("REQUIRED: Project Key (e.g., 'FDIT'). ASK the user if not provided."),
+      summary: z.string().describe("REQUIRED: Ticket title"),
       description: z.string().optional(),
       issueType: z.string().optional(),
     }),
@@ -76,9 +77,9 @@ const jiraWriteTools = [
   }),
   new DynamicStructuredTool({
     name: "update_jira_issue",
-    description: "Update a Jira ticket's fields. Supports: Status, Priority, Summary, Description, Assignee, Due Date, Labels, and Parent. Do NOT change the summary unless explicitly asked.",
+    description: "Update a Jira ticket's fields. REQUIRES 'issueKey' (e.g., 'FDIT-12'). If user doesn't specify the ticket key, ASK them - do NOT guess or retry. Supports: Status, Priority, Summary, Description, Assignee, Due Date, Labels, and Parent. Do NOT change the summary unless explicitly asked.",
     schema: z.object({
-      issueKey: z.string().describe("The ticket key (e.g., 'FDIT-12'). REQUIRED."),
+      issueKey: z.string().describe("REQUIRED: The ticket key (e.g., 'FDIT-12'). ASK the user if not provided."),
       summary: z.string().optional().describe("New title for the ticket."),
       description: z.string().optional().describe("New description text."),
       status: z.string().optional().describe("Target status to move to (e.g., 'In Progress', 'Done')."),
@@ -92,18 +93,18 @@ const jiraWriteTools = [
   }),
   new DynamicStructuredTool({
     name: "delete_jira_issue",
-    description: "Delete a Jira ticket by its key (e.g. FDIT-123).",
+    description: "Delete a Jira ticket by its key. REQUIRES 'issueKey' (e.g., 'FDIT-123'). If user doesn't specify the ticket key, ASK them - do NOT guess or retry.",
     schema: z.object({
-        issueKey: z.string().describe("The ticket key to delete."),
+        issueKey: z.string().describe("REQUIRED: The ticket key to delete (e.g., 'FDIT-123'). ASK the user if not provided."),
     }),
     func: deleteJiraIssue,
   }),
   new DynamicStructuredTool({
     name: "create_jira_project",
-    description: "Create a new Jira Project (sometimes referred to as a Space). REQUIRES ADMIN RIGHTS.",
+    description: "Create a new Jira Project (sometimes referred to as a Space). REQUIRES ADMIN RIGHTS. REQUIRES 'key' and 'name'. If user doesn't specify project key or name, ASK them - do NOT guess or retry.",
     schema: z.object({
-        key: z.string().describe("The Project Key (e.g., 'NEWPROJ'). Must be unique and uppercase."),
-        name: z.string().describe("The name of the project."),
+        key: z.string().describe("REQUIRED: The Project Key (e.g., 'NEWPROJ'). Must be unique and uppercase. ASK user if not provided."),
+        name: z.string().describe("REQUIRED: The name of the project. ASK user if not provided."),
         description: z.string().optional().describe("Project description."),
         templateKey: z.string().optional().describe("Template key (default: 'com.pyxis.greenhopper.jira:gh-simplified-kanban-classic')."),
         projectTypeKey: z.string().optional().describe("Type key (default: 'software')."),
@@ -119,60 +120,60 @@ const jiraTools = [...jiraReadTools, ...jiraWriteTools];
 const githubReadTools = [
   new DynamicStructuredTool({
     name: "get_github_issues",
-    description: "List issues in a GitHub repo.",
+    description: "List issues in a GitHub repo. REQUIRES both 'owner' (GitHub username/org) and 'repo' name. If user doesn't provide the owner, ASK them - do NOT guess or retry.",
     schema: z.object({
-      owner: z.string(),
-      repo: z.string(),
+      owner: z.string().describe("REQUIRED: GitHub username or organization (e.g., 'microsoft', 'facebook'). ASK the user if not provided."),
+      repo: z.string().describe("REQUIRED: Repository name (e.g., 'vscode', 'react')"),
     }),
     func: getRepoIssues,
   }),
   new DynamicStructuredTool({
     name: "list_github_commits",
-    description: "List recent commits in a repo.",
+    description: "List recent commits in a repo. REQUIRES both 'owner' (GitHub username/org) and 'repo' name. If user doesn't provide the owner, ASK them - do NOT guess or retry.",
     schema: z.object({
-      owner: z.string(),
-      repo: z.string(),
+      owner: z.string().describe("REQUIRED: GitHub username or organization (e.g., 'microsoft', 'facebook'). ASK the user if not provided."),
+      repo: z.string().describe("REQUIRED: Repository name (e.g., 'vscode', 'react')"),
       limit: z.number().optional().describe("Number of commits to return (default 5)"),
     }),
     func: listCommits,
   }),
   new DynamicStructuredTool({
     name: "list_github_pull_requests",
-    description: "List pull requests in a repo.",
+    description: "List pull requests in a repo. REQUIRES both 'owner' (GitHub username/org) and 'repo' name. If user doesn't provide the owner, ASK them - do NOT guess or retry.",
     schema: z.object({
-      owner: z.string(),
-      repo: z.string(),
+      owner: z.string().describe("REQUIRED: GitHub username or organization (e.g., 'microsoft', 'facebook'). ASK the user if not provided."),
+      repo: z.string().describe("REQUIRED: Repository name (e.g., 'vscode', 'react')"),
       state: z.enum(['open', 'closed', 'all']).optional().describe("Filter by state (default 'open')"),
     }),
     func: listPullRequests,
   }),
   new DynamicStructuredTool({
     name: "get_github_pull_request_details",
-    description: "Get full details of a specific Pull Request.",
+    description: "Get full details of a specific Pull Request. REQUIRES 'owner', 'repo', and 'pullNumber'. If user doesn't provide the owner, ASK them - do NOT guess or retry.",
     schema: z.object({
-      owner: z.string(),
-      repo: z.string(),
-      pullNumber: z.number().describe("The PR number (e.g. 42)"),
+      owner: z.string().describe("REQUIRED: GitHub username or organization. ASK the user if not provided."),
+      repo: z.string().describe("REQUIRED: Repository name"),
+      pullNumber: z.number().describe("REQUIRED: The PR number (e.g. 42)"),
     }),
     func: getPullRequest,
   }),
   new DynamicStructuredTool({
     name: "get_github_commit_details",
-    description: "Get full details of a specific commit by SHA.",
+    description: "Get full details of a specific commit by SHA. REQUIRES 'owner', 'repo', and 'sha'. If user doesn't provide the owner, ASK them - do NOT guess or retry.",
     schema: z.object({
-      owner: z.string(),
-      repo: z.string(),
-      sha: z.string().describe("The full or partial commit hash"),
+      owner: z.string().describe("REQUIRED: GitHub username or organization. ASK the user if not provided."),
+      repo: z.string().describe("REQUIRED: Repository name"),
+      sha: z.string().describe("REQUIRED: The full or partial commit hash"),
     }),
     func: getCommit,
   }),
   new DynamicStructuredTool({
     name: "get_github_repo_checks",
-    description: "Get check runs for a specific commit reference.",
+    description: "Get check runs for a specific commit reference. REQUIRES 'owner', 'repo', and 'ref'. If user doesn't provide the owner, ASK them - do NOT guess or retry.",
     schema: z.object({
-      owner: z.string(),
-      repo: z.string(),
-      ref: z.string().describe("The commit SHA, branch name, or tag name."),
+      owner: z.string().describe("REQUIRED: GitHub username or organization. ASK the user if not provided."),
+      repo: z.string().describe("REQUIRED: Repository name"),
+      ref: z.string().describe("REQUIRED: The commit SHA, branch name, or tag name."),
     }),
     func: getRepoChecks,
   }),
@@ -423,6 +424,19 @@ const slackTools = [
   }),
 ];
 
+// --- IMAGE TOOLS ---
+const imageTools = [
+  new DynamicStructuredTool({
+    name: "generate_image_nano_banana",
+    description: "Generate an image from a text description using Google's Nano Banana (Gemini 2.5 Flash Image). Use this when the user asks to create, generate, draw, design, or visualise an image, picture, illustration, graphic, logo, or artwork. Returns the local URL path of the generated image.",
+    schema: z.object({
+      prompt: z.string().describe("REQUIRED: A detailed description of the image to generate. Be as descriptive as possible for best results."),
+      aspectRatio: z.enum(['1:1', '2:3', '3:2', '3:4', '4:3', '4:5', '5:4', '9:16', '16:9', '21:9']).optional().describe("Aspect ratio. '1:1' (square), '9:16' (portrait/phone), '16:9' (landscape/widescreen), '3:2' (photo), etc. Default is '1:1'."),
+    }),
+    func: generateImage,
+  }),
+];
+
 // Map categories to their tool arrays
 const toolsByCategory = {
   jira_read: jiraReadTools,
@@ -435,11 +449,12 @@ const toolsByCategory = {
   calendar: calendarTools,
   files: fileTools,
   slack: slackTools,
+  image: imageTools,
   general: [], // No tools needed for general conversation
 };
 
 // All tools combined (for fallback or multi-category queries)
-const allTools = [...jiraTools, ...githubTools, ...systemTools, ...figmaTools, ...audioTools, ...calendarTools, ...fileTools, ...slackTools];
+const allTools = [...jiraTools, ...githubTools, ...systemTools, ...figmaTools, ...audioTools, ...calendarTools, ...fileTools, ...slackTools, ...imageTools];
 
 // =============================================================================
 // SEMANTIC CLASSIFIER (The Traffic Cop)
@@ -459,6 +474,7 @@ CATEGORIES:
 - calendar: Anything about scheduling, meetings, appointments, events, calendar, free time, availability, reminders
 - files: Reading documents, files, PDFs, Word docs, downloads, listing files, latest download, file contents, summarizing documents
 - slack: Sending messages to Slack, posting announcements, notifying team, messaging channels, team notifications
+- image: Generating images, pictures, illustrations, graphics, logos, artwork, drawings, visualisations
 - general: Casual conversation, greetings, questions that don't need tools, chitchat
 
 RULES:
@@ -490,6 +506,9 @@ User: "List my recent downloads" -> files
 User: "Tell the dev-team I fixed the bug" -> slack
 User: "Post to #general that deployment is complete" -> slack
 User: "Notify the team about the new release" -> slack
+User: "Generate an image of a sunset over mountains" -> image
+User: "Draw me a logo for my app" -> image
+User: "Create a picture of a robot" -> image
 
 User message: `;
 
@@ -527,12 +546,19 @@ const KEYWORD_MAP = {
     ],
     files: [
         'download', 'downloaded', 'document', 'pdf', 'docx', 'word doc', 'file',
-        'read file', 'read that', 'summarize file', 'latest file', 'recent file',
-        'my files', 'list files', 'what file', 'that document', 'the file'
+        'read file', 'read that', 'summarize', 'summary', 'latest file', 'recent file',
+        'my files', 'list files', 'what file', 'that document', 'the file', 'the document',
+        'brief me', 'overview', 'contents of', 'open the', 'what does it say'
     ],
     slack: [
         'slack', 'tell the team', 'notify team', 'post to', 'announce', 'message channel',
         'send message', 'tell dev', 'tell #', 'post announcement', 'team notification'
+    ],
+    image: [
+        'generate image', 'create image', 'draw', 'make a picture', 'generate a picture',
+        'create a logo', 'make an image', 'illustration', 'visualize', 'visualise',
+        'generate art', 'create art', 'make art', 'dall-e', 'dalle', 'artwork',
+        'render an image', 'design a logo', 'generate a logo', 'picture of'
     ]
 };
 
@@ -542,7 +568,7 @@ const FALLBACK_KEYWORD_MAP = {
     github: ['github', 'repo', 'pr', 'pull request', 'commit', 'branch', 'push', 'merge', 'clone', 'check', 'code'],
 };
 
-async function classifyIntent(userMessage) {
+async function classifyIntent(userMessage, chatHistory = []) {
     const lowerMsg = userMessage.toLowerCase();
     const detectedCategories = new Set();
 
@@ -567,13 +593,46 @@ async function classifyIntent(userMessage) {
         return Array.from(detectedCategories);
     }
 
+    // 3. CONTEXT PASS: For short messages OR messages with reference words, check conversation context
     const wordCount = userMessage.split(' ').length;
+    const hasReferenceWord = /\b(that|it|this|the file|the document|the pdf|same|above|previous)\b/i.test(userMessage);
+    
+    if ((wordCount < 10 || hasReferenceWord) && chatHistory.length > 0) {
+        console.log("[Traffic Cop] Follow-up detected (short or reference word). Checking conversation context...");
+        
+        // Look at the last few messages to determine context
+        const recentMessages = chatHistory.slice(-4); // Last 2 exchanges (human + AI each)
+        const recentContext = recentMessages.map(m => m.content || '').join(' ').toLowerCase();
+        
+        // Check if recent context mentions any service keywords
+        const contextCategories = new Set();
+        
+        for (const [service, keywords] of Object.entries(FALLBACK_KEYWORD_MAP)) {
+            if (keywords.some(k => recentContext.includes(k))) {
+                contextCategories.add(`${service}_read`);
+                contextCategories.add(`${service}_write`);
+            }
+        }
+        
+        // Also check specific keywords in context
+        for (const [category, keywords] of Object.entries(KEYWORD_MAP)) {
+            if (keywords.some(k => recentContext.includes(k))) {
+                contextCategories.add(category);
+            }
+        }
+        
+        if (contextCategories.size > 0) {
+            console.log(`[Traffic Cop] 🔗 Context-Pass Intent (follow-up): ${Array.from(contextCategories)}`);
+            return Array.from(contextCategories);
+        }
+    }
+
     if (wordCount < 5) {
-        console.log("[Traffic Cop] Short query detected. Defaulting to General.");
+        console.log("[Traffic Cop] Short query with no context. Defaulting to General.");
         return ['general']; 
     }
 
-    // 3. SLOW PASS: Fallback to LLM for ambiguous queries
+    // 4. SLOW PASS: Fallback to LLM for ambiguous queries
     try {
         const response = await classifierLlm.invoke(CLASSIFIER_PROMPT + userMessage);
         const categories = response.content.toLowerCase().trim().split(',').map(c => c.trim());
@@ -634,11 +693,17 @@ class JSONFileChatMessageHistory extends BaseListChatMessageHistory {
         if (!fs.existsSync(HISTORY_FILE_PATH)) return [];
         try {
             const fileContent = await fs.promises.readFile(HISTORY_FILE_PATH, 'utf-8');
+            // Handle empty or whitespace-only files
+            if (!fileContent || !fileContent.trim()) {
+                historyCache[this.sessionId] = [];
+                return [];
+            }
             const allHistory = JSON.parse(fileContent);
             historyCache[this.sessionId] = allHistory[this.sessionId] || [];
             return this.getMessages(); // Recursive call now hits memory
         } catch (e) {
             console.error("Error reading history:", e);
+            historyCache[this.sessionId] = []; // Initialize cache to prevent repeated failures
             return [];
         }
     }
@@ -663,11 +728,21 @@ class JSONFileChatMessageHistory extends BaseListChatMessageHistory {
             let allHistory = {};
             if (fs.existsSync(HISTORY_FILE_PATH)) {
                  const data = await fs.promises.readFile(HISTORY_FILE_PATH, 'utf-8');
-                 allHistory = JSON.parse(data);
+                 // Handle empty or malformed files
+                 if (data && data.trim()) {
+                     try {
+                         allHistory = JSON.parse(data);
+                     } catch (parseErr) {
+                         console.warn("[History] Corrupted history file, resetting.", parseErr.message);
+                         allHistory = {};
+                     }
+                 }
             }
             allHistory[this.sessionId] = historyCache[this.sessionId];
             await fs.promises.writeFile(HISTORY_FILE_PATH, JSON.stringify(allHistory, null, 2));
-        } catch(e) { /* ignore write errors for speed */ }
+        } catch(e) {
+            console.error("[History] Failed to save to disk:", e.message);
+        }
     }
     
     // ... clear() method remains similar ...
@@ -677,32 +752,26 @@ function getMessageHistory(sessionId) {
   return new JSONFileChatMessageHistory(sessionId);
 }
 
-// Use dynamic system prompt with current date
-const systemPrompt = getSystemPrompt();
-
 // =============================================================================
 // DYNAMIC AGENT CREATION (Traffic Cop Pattern)
 // =============================================================================
 
-// Cache for agents by tool signature to avoid recreating identical agents
-const agentCache = new Map();
-
+// Create agent with fresh timestamp each time (don't cache system prompt)
 function getOrCreateAgent(tools) {
+    // Always get fresh system prompt with current time
+    const systemPrompt = getSystemPrompt();
+    
     // Create a signature based on tool names
     const toolSignature = tools.map(t => t.name).sort().join(',');
     
-    if (agentCache.has(toolSignature)) {
-        return agentCache.get(toolSignature);
-    }
-    
+    // Don't cache agents - always create fresh to ensure current timestamp
     const agent = createReactAgent({
         llm,
         tools,
         stateModifier: systemPrompt,
     });
     
-    agentCache.set(toolSignature, agent);
-    console.log(`[Agent Factory] Created new agent with tools: ${toolSignature || '(none)'}`);
+    console.log(`[Agent Factory] Created agent with tools: ${toolSignature || '(none)'}`);
     return agent;
 }
 
@@ -711,18 +780,33 @@ async function processWithSemanticRouting(input) {
     const { input: userQuery, chat_history } = input;
     const history = Array.isArray(chat_history) ? chat_history : [];
     
-    // Step 1: Classify intent using the Traffic Cop
-    const categories = await classifyIntent(userQuery);
+    // Step 1: Classify intent using the Traffic Cop (now with context)
+    const categories = await classifyIntent(userQuery, history);
     
     // Step 2: Get the appropriate tools for the classified categories
     const selectedTools = getToolsForCategories(categories);
     
     console.log(`[Traffic Cop] Selected ${selectedTools.length} tools for categories: ${categories.join(', ')}`);
     
-    // Step 3: Get or create an agent with these specific tools
+    // Step 3: Handle "general" conversation directly with LLM (no agent needed)
+    if (selectedTools.length === 0) {
+        console.log("[Traffic Cop] General conversation - using direct LLM call");
+        
+        const systemPrompt = getSystemPrompt();
+        const messages = [
+            new SystemMessage(systemPrompt),
+            ...history,
+            new HumanMessage(userQuery)
+        ];
+        
+        const response = await llm.invoke(messages);
+        return { messages: [...history, new HumanMessage(userQuery), response] };
+    }
+    
+    // Step 4: Get or create an agent with these specific tools
     const agent = getOrCreateAgent(selectedTools);
     
-    // Step 4: Execute the agent
+    // Step 5: Execute the agent
     const result = await agent.invoke({
         messages: [...history, new HumanMessage(userQuery)]
     });
@@ -735,8 +819,8 @@ export async function* streamWithSemanticRouting(userQuery, sessionId) {
     const messageHistory = getMessageHistory(sessionId);
     const history = await messageHistory.getMessages();
     
-    // Step 1: Classify intent using the Traffic Cop
-    const categories = await classifyIntent(userQuery);
+    // Step 1: Classify intent using the Traffic Cop (with conversation context)
+    const categories = await classifyIntent(userQuery, history);
 
     const lowerQuery = userQuery.toLowerCase();
 
@@ -745,12 +829,17 @@ export async function* streamWithSemanticRouting(userQuery, sessionId) {
         
         // Run the tool directly (ensure getSystemStatus is imported from ./systemTool.js)
         const status = await getSystemStatus(); 
+        const reflexResponse = `**Reflex Response:**\n${status}`;
         
         // Fake the streaming event so the frontend handles it normally
         yield { 
             event: "on_chat_model_stream", 
-            data: { chunk: { content: `**Reflex Response:**\n${status}` } } 
+            data: { chunk: { content: reflexResponse } } 
         };
+        
+        // Save reflex response to history
+        await messageHistory.addMessage(new HumanMessage(userQuery));
+        await messageHistory.addMessage(new AIMessage(reflexResponse));
         return;
     }
     
@@ -759,10 +848,43 @@ export async function* streamWithSemanticRouting(userQuery, sessionId) {
     
     console.log(`[Traffic Cop] Selected ${selectedTools.length} tools for categories: ${categories.join(', ')}`);
     
-    // Step 3: Get or create an agent with these specific tools
+    // Step 3: Handle "general" conversation directly with LLM (no agent needed)
+    if (selectedTools.length === 0) {
+        console.log("[Traffic Cop] General conversation - using direct LLM call");
+        
+        const systemPrompt = getSystemPrompt();
+        const messages = [
+            new SystemMessage(systemPrompt),
+            ...history,
+            new HumanMessage(userQuery)
+        ];
+        
+        const stream = await llm.stream(messages);
+        
+        let completeResponse = "";
+        for await (const chunk of stream) {
+            const content = chunk.content;
+            if (content) {
+                completeResponse += content;
+                yield { 
+                    event: "on_chat_model_stream", 
+                    data: { chunk: { content } } 
+                };
+            }
+        }
+        
+        // Save to history after streaming completes
+        await messageHistory.addMessage(new HumanMessage(userQuery));
+        if (completeResponse) {
+            await messageHistory.addMessage(new AIMessage(completeResponse));
+        }
+        return;
+    }
+    
+    // Step 4: Get or create an agent with these specific tools
     const agent = getOrCreateAgent(selectedTools);
     
-    // Step 4: Stream events from the agent
+    // Step 5: Stream events from the agent
     const stream = agent.streamEvents(
         { messages: [...history, new HumanMessage(userQuery)] },
         { version: "v2" }

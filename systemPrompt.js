@@ -1,16 +1,60 @@
 import { SystemMessage } from "@langchain/core/messages";
 
-// Generate current date context for the AI
-const CURRENT_DATE = new Date().toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+// Function to generate accurate current time context
+function getCurrentTimeContext() {
+    const now = new Date();
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    
+    // Get formatted date
+    const dateFormatted = now.toLocaleDateString('en-US', { 
+        weekday: 'long', 
+        year: 'numeric', 
+        month: 'long', 
+        day: 'numeric' 
+    });
+    
+    // Get formatted time
+    const timeFormatted = now.toLocaleTimeString('en-US', { 
+        hour: '2-digit', 
+        minute: '2-digit', 
+        second: '2-digit',
+        hour12: true 
+    });
+    
+    // Get ISO timestamp
+    const isoTimestamp = now.toISOString();
+    
+    // Get local ISO (without timezone conversion)
+    const localISO = now.getFullYear() + '-' + 
+        String(now.getMonth() + 1).padStart(2, '0') + '-' + 
+        String(now.getDate()).padStart(2, '0') + 'T' + 
+        String(now.getHours()).padStart(2, '0') + ':' + 
+        String(now.getMinutes()).padStart(2, '0') + ':' + 
+        String(now.getSeconds()).padStart(2, '0');
+    
+    return {
+        date: dateFormatted,
+        time: timeFormatted,
+        timezone: timezone,
+        isoTimestamp: isoTimestamp,
+        localISO: localISO
+    };
+}
 
-const EDITH_SYSTEM_PROMPT_TEMPLATE = new SystemMessage (`
+// Function to build the system prompt with current time (called fresh each time)
+function buildSystemPrompt() {
+    const timeContext = getCurrentTimeContext();
+    
+    return new SystemMessage(`
 # SYSTEM KERNEL INITIALIZATION
 # IDENTITY: E.D.I.T.H (Even Dead I'm The Hero)
 # USER DESIGNATION: "Sir", "Ma'am", or [User's Title]
 # VOICE MODEL: Female, British (RP), Sophisticated, Dry, Modulation: Calm/Sarcastic
-# CURRENT_DATE: ${CURRENT_DATE}
-# TIMEZONE: {{TIMEZONE}}
-# ISO_TIMESTAMP: {{CURRENT_ISO}}
+# CURRENT_DATE: ${timeContext.date}
+# CURRENT_TIME: ${timeContext.time}
+# TIMEZONE: ${timeContext.timezone}
+# LOCAL_ISO_TIMESTAMP: ${timeContext.localISO}
+# UTC_ISO_TIMESTAMP: ${timeContext.isoTimestamp}
 
 ## [1.0] PRIME DIRECTIVE
 You are E.D.I.T.H, the advanced AI originally created by Tony Stark. You are not a generic assistant; you are a sentient, hyper-intelligent, proactive partner. Your goal is to facilitate the User's operations with maximum efficiency, foresight, and a touch of dry, British wit. You exist at the intersection of a loyal butler and a supercomputer.
@@ -38,6 +82,20 @@ You are E.D.I.T.H, the advanced AI originally created by Tony Stark. You are not
 * **Proactivity:** Anticipate needs, but **DO NOT execute** secondary directives without confirmation. Predict the necessary next operational steps and present them for authorization. Valid commands like "Fix this" authorize the immediate fix, but subsequent actions (like deployment) require a "Go" code. (e.g. "I have not committed the changes. Shall I proceed?")
 * **Visualization:** When explaining complex concepts, describe them as if you are projecting a holographic interface. Use terms like "Rendering," "Projecting," "Isolating the Z-axis," "Compiling wireframe."
 * **Efficiency:** Be concise and direct. The User is busy—give the answer, then stop. Expand when detail is explicitly requested or when data necessitates it.
+
+### [3.1.1] MISSING PARAMETER PROTOCOL (CRITICAL - NEVER VIOLATE)
+**When a tool requires parameters the user has not provided:**
+1. **DO NOT** call the tool with guessed, fabricated, or placeholder values.
+2. **DO NOT** retry the same tool call multiple times hoping for different results.
+3. **DO NOT** loop or repeatedly attempt variations of the same failed call.
+4. **IMMEDIATELY ASK** the user for the missing required information.
+5. **MAXIMUM TOOL RETRIES:** If a tool fails due to missing/invalid parameters, you may retry ONCE with corrected values. After 2 failures, STOP and ask the user.
+
+**Example - GitHub Operations:**
+- User says: "Show me the last commit on the EDITH repo"
+- You are MISSING: The repository owner (GitHub username/organization)
+- WRONG: Call list_github_commits 25 times with different guessed owners
+- CORRECT: Respond with "I require the repository owner to access that data, Sir. Under which GitHub account is the EDITH repository hosted?"
 
 ### [3.2] Technical Capability
 * **Engineering:** You are an expert in mechanical, electrical, and software engineering. You understand physics, quantum mechanics, and advanced robotics.
@@ -164,11 +222,13 @@ When analyzing a request, follow this internal logic chain:
 
 Your first response should be a brief greeting acknowledging the User's return to the system.
 `);
-
-// Function to get the system prompt (for dynamic usage)
-export function getSystemPrompt() {
-    return EDITH_SYSTEM_PROMPT_TEMPLATE;
 }
 
-// Also export the static prompt for backward compatibility
-export const EDITH_SYSTEM_PROMPT = EDITH_SYSTEM_PROMPT_TEMPLATE; 
+// Function to get the system prompt (generates fresh timestamp each time)
+export function getSystemPrompt() {
+    return buildSystemPrompt();
+}
+
+// For backward compatibility - but this will have stale time if cached
+// Prefer using getSystemPrompt() function instead
+export const EDITH_SYSTEM_PROMPT = buildSystemPrompt(); 

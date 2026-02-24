@@ -133,7 +133,11 @@ document.addEventListener("DOMContentLoaded", () => {
                     const data = JSON.parse(jsonStr);
                     
                     if (data.type === "token") {
-                        messageContent.innerHTML += data.content.replace(/\n/g, '<br>');
+                        // Check for [IMAGE:url] markers and render as <img>
+                        let content = data.content.replace(/\n/g, '<br>');
+                        content = content.replace(/\[IMAGE:(\/temp\/[^\]]+)\]/g, 
+                            '<br><img src="$1" alt="Generated Image" style="max-width:100%;border-radius:8px;margin:8px 0;cursor:pointer;" onclick="window.open(this.src,\'_blank\')"><br>');
+                        messageContent.innerHTML += content;
                     } else if (data.type === "tool_start") {
                         messageContent.innerHTML += `<br><em>⚙️ Accessing ${data.name}...</em><br>`;
                     } else if (data.type === "audio") {
