@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { Github, Figma, Calendar, MessageSquare, CheckCircle2, Plug, Unplug, Wifi } from 'lucide-react';
+import { oauthConnect, oauthDisconnect, oauthStatus } from '../../services/api.js';
 import styles from './Settings.module.css';
 import { useNavBar } from '../../components/NavBar/NavBarContext.jsx';
 
@@ -13,7 +15,8 @@ const providers = [
 
 const Settings = () => {
   const { expanded } = useNavBar();
-  const [oauthStatus, setOauthStatus] = useState({
+  const [searchParams] = useSearchParams();
+  const [oauthStatusState, setOauthStatusState] = useState({
     google: { connected: false },
     github: { connected: false },
     slack: { connected: false },
@@ -25,42 +28,46 @@ const Settings = () => {
   const [connecting, setConnecting] = useState('');
 
   useEffect(() => {
-    if (window.electronAPI) {
-      window.electronAPI.oauthStatus().then(setOauthStatus);
+    // Check for OAuth callback results
+    const success = searchParams.get('oauth_success');
+    const error = searchParams.get('oauth_error');
+    if (success) {
+      setStatus({ type: 'success', message: `Connected to ${success}!` });
+      setTimeout(() => setStatus({ type: '', message: '' }), 5000);
+    } else if (error) {
+      setStatus({ type: 'error', message: `OAuth error: ${error}` });
+      setTimeout(() => setStatus({ type: '', message: '' }), 5000);
     }
-  }, []);
+
+    // Load current status
+    oauthStatus().then(setOauthStatusState).catch(() => {});
+  }, [searchParams]);
 
   const handleConnect = async (provider) => {
-    if (!window.electronAPI) return;
     setConnecting(provider);
     try {
-      const result = await window.electronAPI.oauthConnect(provider);
-      if (result.success) {
-        setOauthStatus(prev => ({
-          ...prev,
-          [provider]: { connected: true, expired: false, hasRefreshToken: true },
-        }));
-        setStatus({ type: 'success', message: `Connected to ${provider}!` });
-      } else {
-        setStatus({ type: 'error', message: `Failed to connect ${provider}: ${result.error}` });
-      }
+      await oauthConnect(provider);
+      // oauthConnect redirects the browser
     } catch (err) {
       setStatus({ type: 'error', message: `OAuth error: ${err.message}` });
-    } finally {
       setConnecting('');
       setTimeout(() => setStatus({ type: '', message: '' }), 5000);
     }
   };
 
   const handleDisconnect = async (provider) => {
-    if (!window.electronAPI) return;
-    await window.electronAPI.oauthDisconnect(provider);
-    setOauthStatus(prev => ({
-      ...prev,
-      [provider]: { connected: false, expired: true, hasRefreshToken: false },
-    }));
-    setStatus({ type: 'info', message: `Disconnected from ${provider}.` });
-    setTimeout(() => setStatus({ type: '', message: '' }), 3000);
+    try {
+      await oauthDisconnect(provider);
+      setOauthStatusState(prev => ({
+        ...prev,
+        [provider]: { connected: false, expired: true, hasRefreshToken: false },
+      }));
+      setStatus({ type: 'info', message: `Disconnected from ${provider}.` });
+      setTimeout(() => setStatus({ type: '', message: '' }), 3000);
+    } catch (err) {
+      setStatus({ type: 'error', message: `Error disconnecting: ${err.message}` });
+      setTimeout(() => setStatus({ type: '', message: '' }), 5000);
+    }
   };
 
   return (
@@ -86,7 +93,7 @@ const Settings = () => {
 
         <div className={styles.cardGrid}>
           {providers.map(({ key, label, description, icon: Icon }) => {
-            const isConnected = oauthStatus[key]?.connected;
+            const isConnected = oauthStatusState[key]?.connected;
             const isConnecting = connecting === key;
 
             return (

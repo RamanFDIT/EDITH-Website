@@ -1,8 +1,9 @@
 import Logo from '../../assets/EDITH.svg?react';
 import Button from '../../components/Button/Button.jsx';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { useState } from 'react';
+import { useNavigate, useLocation, useSearchParams } from 'react-router-dom';
+import { useState, useEffect } from 'react';
 import { Github, Calendar, MessageSquare, CheckCircle2, Plug, Wifi, AlertCircle } from 'lucide-react';
+import { oauthConnect, oauthStatus } from '../../services/api.js';
 import styles from './ConnectionPage.module.css';
 
 const cardInfo = [
@@ -15,6 +16,7 @@ const cardInfo = [
 const ConnectionPage = () => {
     const location = useLocation();
     const navigate = useNavigate();
+    const [searchParams] = useSearchParams();
     const selectedTools = location.state?.selectedTools || [];
     const [connectionStatus, setConnectionStatus] = useState({});
 
@@ -22,26 +24,31 @@ const ConnectionPage = () => {
         card.cardHead === 'Google' || selectedTools.includes(card.cardHead)
     );
 
-    const handleConnection = async (providerKey) => {
-        if (!providerKey) {
-            console.error(`No OAuth provider mapped for "${providerKey}"`);
-            return;
+    // Check for OAuth callback results and load current status
+    useEffect(() => {
+        const success = searchParams.get('oauth_success');
+        if (success) {
+            setConnectionStatus(prev => ({ ...prev, [success]: 'connected' }));
         }
 
-        if (!window.electronAPI) {
-            console.error('Not running in Electron — OAuth unavailable');
-            return;
-        }
+        // Load current OAuth status
+        oauthStatus().then(status => {
+            const updated = {};
+            for (const [provider, info] of Object.entries(status)) {
+                if (info.connected) updated[provider] = 'connected';
+            }
+            setConnectionStatus(prev => ({ ...prev, ...updated }));
+        }).catch(() => {});
+    }, [searchParams]);
+
+    const handleConnection = async (providerKey) => {
+        if (!providerKey) return;
 
         setConnectionStatus(prev => ({ ...prev, [providerKey]: 'connecting' }));
 
         try {
-            const result = await window.electronAPI.oauthConnect(providerKey);
-            if (result.success){
-                setConnectionStatus(prev => ({ ...prev, [providerKey]: 'connected' }));
-            } else {
-                setConnectionStatus(prev => ({ ...prev, [providerKey]: 'failed' }));
-            }
+            await oauthConnect(providerKey);
+            // oauthConnect redirects the browser, so we won't reach here
         } catch (err) {
             console.error(`OAuth error for "${providerKey}":`, err);
             setConnectionStatus(prev => ({ ...prev, [providerKey]: 'failed' }));

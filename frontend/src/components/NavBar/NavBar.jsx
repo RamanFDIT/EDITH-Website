@@ -7,6 +7,8 @@ import profile from '../../assets/profile.svg';
 import { useState, useEffect } from 'react';
 import { Github, Figma, Calendar, MessageSquare, Plus, LogOut } from 'lucide-react';
 import { useNavBar } from './NavBarContext.jsx';
+import { useAuth } from '../../contexts/AuthContext.jsx';
+import { oauthStatus, oauthLogout } from '../../services/api.js';
 
 const toolDisplayNames = {
   google: 'Google',
@@ -28,20 +30,19 @@ const NavBar = () => {
   const { expanded: toggle, setExpanded } = useNavBar();
   const [connectedTools, setConnectedTools] = useState([]);
   const navigate = useNavigate();
+  const { logout } = useAuth();
 
   const handleClick = () => {
     setExpanded(!toggle);
   };
 
   useEffect(() => {
-    if (window.electronAPI) {
-      window.electronAPI.oauthStatus().then((status) => {
-        const active = Object.entries(status)
-          .filter(([, info]) => info.connected)
-          .map(([provider]) => provider);
-        setConnectedTools(active);
-      });
-    }
+    oauthStatus().then((status) => {
+      const active = Object.entries(status)
+        .filter(([, info]) => info.connected)
+        .map(([provider]) => provider);
+      setConnectedTools(active);
+    }).catch(() => {});
   }, []);
 
   return (
@@ -82,10 +83,9 @@ const NavBar = () => {
           <button
             className={toggle ? styles.logoutButton : styles.logoutButtonCompact}
             onClick={async () => {
-              if (window.electronAPI) {
-                await window.electronAPI.logout();
-              }
-              navigate('/');
+              try { await oauthLogout(); } catch (e) { /* ignore */ }
+              await logout();
+              navigate('/login');
             }}
           >
             <LogOut size={20} className={styles.logoutIcon} />

@@ -4,6 +4,7 @@ import ChatAI from '../../components/ChatAI/ChatAI.jsx';
 import ChatHuman from '../../components/ChatHuman/ChatHuman.jsx';
 import Input from '../../components/Input/Input.jsx';
 import { useNavBar } from '../../components/NavBar/NavBarContext.jsx';
+import { askQuestion } from '../../services/api.js';
 
 const Home = () => {
   const { expanded } = useNavBar();
@@ -27,11 +28,7 @@ const Home = () => {
     setMessages(prev => [...prev, { role: 'ai', content: '' }]);
 
     try {
-      const res = await fetch('http://localhost:3000/api/ask', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question }),
-      });
+      const res = await askQuestion(question);
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
